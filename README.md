@@ -1,4 +1,5 @@
-#Velvet Rope
+# Velvet Rope
+
 A greedy parallel execution tool. Given a list of processes to be run, velvetrope will try to maximize cpu and mem usage killing and requeing tasks when mem limit is hit.
 
 	usage: velvetrope.py [-h] --max_processes MAX_PROCESSES --mem_reserve MEM_RESERVE [--interval INTERVAL]
