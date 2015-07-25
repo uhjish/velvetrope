@@ -8,6 +8,7 @@ import signal
 import argparse
 import shlex
 import threading
+import logging
 from collections import deque
 
 running = []
@@ -45,11 +46,19 @@ except:
     raise Exception("mem_reserved should be specified in m or g, ex: 1024m")
 poll_interval = args.interval
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+logger.info("VelvetRope started, max_processes: %d, mem_reserve: %s, interval: %d" % (max_processes, args.mem_reserve, poll_interval))
+
 cmd_list = deque()
 
 #read list of commands from stdin
 for line in sys.stdin:
     cmd_list.append( line.strip() )
+
+starting_count = len(cmd_list)
+logger.info("Read %d commands into queue from stdin." % len(cmd_list))
 
 signal.signal(signal.SIGINT, shutdown)
 signal.signal(signal.SIGTERM, shutdown)
@@ -59,15 +68,17 @@ while not exit_flag.isSet():
     mem_free = get_free_memory( ) 
     if len(running) < max_processes and mem_free > mem_reserved and len(cmd_list) > 0:
         cmd = cmd_list.popleft()
-	print cmd
         p = sp.Popen( shlex.split(cmd) )
         running.append( (cmd, p) )
+        logger.info( "Starting process in slot [%d/%d]: %s" % (len(running), max_processes, cmd) )
+        logger.info( "Processes left in queue: %d/%d" % (len(cmd_list), starting_count) )
     if len(running) == 0 and len(cmd_list) == 0:
         exit_flag.set()
     if mem_free < mem_reserved and len(running) > 1:
         #kill and requeue most recent task
         cmd, p = running.pop()
-	print "hit memory limit, killing and requeing:\n %s" % cmd
         p.kill()
         cmd_list.append( cmd )
+	logger.info( "Hit free memory threshold [%dm / %dm], bouncing process:\n %s" % (mem_free/1024/1024, mem_reserved/1024/1024, cmd) )
+        logger.info( "Processes left in queue: %d/%d" % (len(cmd_list), starting_count) )
     time.sleep( poll_interval )
