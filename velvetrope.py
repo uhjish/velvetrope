@@ -12,18 +12,24 @@ import logging
 from collections import deque
 
 running = []
+exit_flag = threading.Event()
 
 def get_free_memory():
     m = psutil.virtual_memory()
     return m.available
 
+def killall():
+    logger.info('Shutting down running procesess.')
+    for cmd, p in running:
+        p.kill()
+        logger.info('Killed: %s' % cmd)
+    exit_flag.set()
+
 def shutdown(signal, frame):
     """ Handler for the SIGINT signal. Sets the ``exit_flag`` to shutdown
     """
-    print 'Caught interrupt, shutting down.'
-    for cmd, p in running:
-        p.kill()
-    exit_flag.set()
+    logger.info('Caught interrupt, shutting down.')
+    killall()
 
 def parse_mem_arg( arg ):
     units = arg.lower()[-1]
@@ -37,6 +43,7 @@ parser = argparse.ArgumentParser(prog="velvetrope.py", description="run max_proc
 parser.add_argument('--max_processes', type=int, required=True, help='maximum number of processes to run concurrently')
 parser.add_argument('--mem_reserve', required=True, help='free memory threshold to maintain in m or g, ex: 1024m, 1g')
 parser.add_argument('--interval',type=int,default=5, help='polling interval in seconds - allows RAM to equilibrate between starting/killing jobs, default: 5')
+parser.add_argument('--ignore_errors', action="store_true", default=False, help='ignore commands that exit with error and continue running')
 
 args = parser.parse_args()
 max_processes = args.max_processes
@@ -45,6 +52,7 @@ try:
 except:
     raise Exception("mem_reserved should be specified in m or g, ex: 1024m")
 poll_interval = args.interval
+ignore_errors = args.ignore_errors
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -62,8 +70,15 @@ logger.info("Read %d commands into queue from stdin." % len(cmd_list))
 
 signal.signal(signal.SIGINT, shutdown)
 signal.signal(signal.SIGTERM, shutdown)
-exit_flag = threading.Event()
 while not exit_flag.isSet():
+    failed = [ x for x in running if x[1].poll() > 0 ]
+    if len(failed) > 0:
+        for cmd, p in failed:
+            logger.error( "Command failed with non-zero exit code: %s" % cmd )
+        if not ignore_errors:
+            killall()
+            exit_flag.set()
+            raise Exception("Encountered failed command! Set --ignore_errors to ignore failures.")
     running = [ x for x in running if x[1].poll()==None ]
     mem_free = get_free_memory( ) 
     if len(running) < max_processes and mem_free > mem_reserved and len(cmd_list) > 0:
